@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+body {
+  background-color: #0f172a; /* Tailwind slate-900 */
+  color: white;
+  margin: 0;
+  font-family: sans-serif;
+}
+
+/* Custom React Flow edge styles for the "Sexy UI" */
+.react-flow__edge-path {
+  stroke-width: 3;
+}
+
+.edge-glow path {
+  stroke: #3b82f6 !important; /* Neon Blue */
+  filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.8));
+  animation: dash 1s linear infinite;
+}
+
+.edge-off path {
+  stroke: #475569 !important; /* Slate 600 */
+}
+
+/* Fix React Flow Controls */
+.react-flow__controls-button {
+  background-color: #1e293b !important;
+  fill: #94a3b8 !important;
+  border-bottom: 1px solid #334155 !important;
+}
+.react-flow__controls-button:hover {
+  background-color: #334155 !important;
+  fill: #ffffff !important;
+}
