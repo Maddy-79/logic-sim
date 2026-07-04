@@ -109,6 +109,7 @@ export default function App() {
   }, [nodes, edges]);
 
   // Handle deletions & movement (taking snapshot on specific actions)
+  // Ex. comment to run cloudflare
   const onNodesChange = useCallback((changes) => {
     if (changes.some(c => c.type === 'remove' || c.type === 'add')) takeSnapshot();
     setNodes((nds) => applyNodeChanges(changes, nds));
