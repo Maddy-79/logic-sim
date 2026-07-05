@@ -126,12 +126,20 @@ export default function App() {
 
   const onDrop = useCallback((event) => {
       event.preventDefault();
-      const type = event.dataTransfer.getData('application/reactflow');
-      const gateType = event.dataTransfer.getData('application/gateType');
+      
+      // Determine coordinates for both mouse and touch
+      const reactFlowBounds = reactFlowWrapper.current.getBoundingClientRect();
+      const type = event.dataTransfer?.getData('application/reactflow');
+      const gateType = event.dataTransfer?.getData('application/gateType');
 
       if (!type) return;
 
-      const position = reactFlowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      // Calculate position
+      const position = reactFlowInstance.screenToFlowPosition({
+        x: event.clientX || (event.changedTouches && event.changedTouches[0].clientX),
+        y: event.clientY || (event.changedTouches && event.changedTouches[0].clientY),
+      });
+
       const newNode = {
         id: getId(), type, position,
         data: { gateType: gateType || undefined, value: 0, inputs: {} },
