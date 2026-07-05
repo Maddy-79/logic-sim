@@ -1,62 +1,58 @@
 export const evaluateCircuit = (nodes, edges) => {
-  // Create a map for quick node lookup
-  const nodeMap = new Map(nodes.map(n => [n.id, { ...n }]));
-  const edgeStates = {}; // Keep track of which wires are carrying a '1'
-
-  // Reset all gate inputs first
+  const nodeValues = {};
+  const edgeStates = {};
+  
+  // 1. Initialize input nodes from their data values
   nodes.forEach(node => {
-    if (node.type === 'gateNode' || node.type === 'outputNode') {
-      nodeMap.get(node.id).data = { ...node.data, inputs: {} };
+    if (node.type === 'inputNode') {
+      nodeValues[node.id] = node.data.value || 0;
     }
   });
 
-  // Evaluate logic (simplified topological approach for MVP)
-  let changed = true;
-  let iterations = 0;
-
-  while (changed && iterations < 100) {
-    changed = false;
-    iterations++;
-
+  // 2. Multi-pass evaluation (ensures signals propagate through chains)
+  // We run this enough times to ensure signals reach the end of any chain
+  for (let pass = 0; pass < nodes.length; pass++) {
     edges.forEach(edge => {
-      const sourceNode = nodeMap.get(edge.source);
-      const targetNode = nodeMap.get(edge.target);
+      const sourceNode = nodes.find(n => n.id === edge.source);
+      if (sourceNode && nodeValues[sourceNode.id] !== undefined) {
+        edgeStates[edge.id] = nodeValues[sourceNode.id];
+      }
+    });
 
-      if (sourceNode && targetNode) {
-        const sourceValue = sourceNode.data.value || 0;
-        
-        // Track edge state for glowing effect
-        edgeStates[edge.id] = sourceValue;
+    nodes.forEach(node => {
+      if (node.type === 'gateNode') {
+        // Find all incoming edges to this gate
+        const incomingEdges = edges.filter(e => e.target === node.id);
+        const inputValues = incomingEdges.map(e => edgeStates[e.id] || 0);
 
-        // Pass value to target's specific input handle (e.g., 'a' or 'b')
-        const currentInputValue = targetNode.data.inputs[edge.targetHandle];
-        
-        if (currentInputValue !== sourceValue) {
-          targetNode.data.inputs[edge.targetHandle] = sourceValue;
-          changed = true;
+        // Perform logic based on gate type
+        let result = 0;
+        const [a, b] = inputValues; // Handles up to 2 inputs
 
-          // Re-evaluate target node logic
-          if (targetNode.type === 'gateNode') {
-            const { inputs, gateType } = targetNode.data;
-            const valA = inputs['a'] || 0;
-            const valB = inputs['b'] || 0;
-
-            if (gateType === 'AND') targetNode.data.value = valA & valB;
-            if (gateType === 'OR') targetNode.data.value = valA | valB;
-            if (gateType === 'NOT') targetNode.data.value = valA === 0 ? 1 : 0;
-            if (gateType === 'NAND') targetNode.data.value = (valA & valB) === 0 ? 1 : 0;
-            if (gateType === 'NOR') targetNode.data.value = (valA | valB) === 0 ? 1 : 0;
-            if (gateType === 'XOR') targetNode.data.value = valA ^ valB;
-            if (gateType === 'XNOR') targetNode.data.value = (valA ^ valB) === 0 ? 1 : 0;
-          }
-          
-          if (targetNode.type === 'outputNode') {
-            targetNode.data.value = targetNode.data.inputs['in'] || 0;
-          }
+        switch (node.data.gateType) {
+          case 'AND': result = (a && b) ? 1 : 0; break;
+          case 'OR':  result = (a || b) ? 1 : 0; break;
+          case 'NOT': result = (a === 0) ? 1 : 0; break;
+          case 'NAND': result = (!(a && b)) ? 1 : 0; break;
+          case 'NOR':  result = (!(a || b)) ? 1 : 0; break;
+          case 'XOR':  result = (a !== b) ? 1 : 0; break;
+          default: result = 0;
         }
+        nodeValues[node.id] = result;
+      }
+      
+      if (node.type === 'outputNode') {
+        const incomingEdge = edges.find(e => e.target === node.id);
+        nodeValues[node.id] = incomingEdge ? (edgeStates[incomingEdge.id] || 0) : 0;
       }
     });
   }
 
-  return { updatedNodes: Array.from(nodeMap.values()), edgeStates };
+  // Map values back to nodes for the UI
+  const updatedNodes = nodes.map(n => ({
+    ...n,
+    data: { ...n.data, value: nodeValues[n.id] ?? 0 }
+  }));
+
+  return { updatedNodes, edgeStates };
 };

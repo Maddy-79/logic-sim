@@ -22,8 +22,9 @@ export default function App() {
   const [nodes, setNodes] = useState([]);
   const [edges, setEdges] = useState([]);
   const [reactFlowInstance, setReactFlowInstance] = useState(null);
+  
+  const [truthTable, setTruthTable] = useState(null);
 
-  // 1. THE FIX: State Refs to prevent stale closures and infinite loops
   const nodesRef = useRef([]);
   const edgesRef = useRef([]);
   useEffect(() => {
@@ -31,17 +32,14 @@ export default function App() {
     edgesRef.current = edges;
   }, [nodes, edges]);
 
-  // Undo/Redo State History
   const [past, setPast] = useState([]);
   const [future, setFuture] = useState([]);
 
-  // Snapshot now uses the refs, meaning it never causes a re-render!
   const takeSnapshot = useCallback(() => {
     setPast((p) => [...p.slice(-15), { nodes: nodesRef.current, edges: edgesRef.current }]);
     setFuture([]);
   }, []);
 
-  // Keyboard Event Listener for Undo (Ctrl+Z) / Redo (Ctrl+Y)
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
@@ -77,7 +75,6 @@ export default function App() {
     }));
   }, [takeSnapshot]);
 
-  // 2. THE FIX: Bail out of the update if no switches needed attaching
   useEffect(() => {
     setNodes((nds) => {
       let changed = false;
@@ -88,11 +85,10 @@ export default function App() {
         }
         return n;
       });
-      return changed ? newNodes : nds; // If nothing changed, skip the update!
+      return changed ? newNodes : nds;
     });
   }, [toggleInput, nodes.length]); 
 
-  // Circuit Evaluation Engine
   useEffect(() => {
     const { updatedNodes, edgeStates } = evaluateCircuit(nodes, edges);
     const updatedEdges = edges.map(edge => ({
@@ -108,8 +104,6 @@ export default function App() {
     }
   }, [nodes, edges]);
 
-  // Handle deletions & movement (taking snapshot on specific actions)
-  // Ex. comment to run cloudflare
   const onNodesChange = useCallback((changes) => {
     if (changes.some(c => c.type === 'remove' || c.type === 'add')) takeSnapshot();
     setNodes((nds) => applyNodeChanges(changes, nds));
@@ -147,10 +141,142 @@ export default function App() {
       setNodes((nds) => nds.concat(newNode));
     }, [reactFlowInstance, takeSnapshot]);
 
+  const onSave = useCallback(() => {
+    if (reactFlowInstance) {
+      const flow = reactFlowInstance.toObject();
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(flow));
+      const downloadAnchorNode = document.createElement('a');
+      downloadAnchorNode.setAttribute("href", dataStr);
+      downloadAnchorNode.setAttribute("download", "my_circuit.json");
+      document.body.appendChild(downloadAnchorNode);
+      downloadAnchorNode.click();
+      downloadAnchorNode.remove();
+    }
+  }, [reactFlowInstance]);
+
+  const onLoad = useCallback((event) => {
+    const file = event.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const flow = JSON.parse(e.target.result);
+          if (flow) {
+            setNodes(flow.nodes || []);
+            setEdges(flow.edges || []);
+            takeSnapshot(); 
+          }
+        } catch (err) {
+          alert("Invalid circuit file!");
+        }
+      };
+      reader.readAsText(file);
+    }
+  }, [takeSnapshot]);
+
+  const generateTruthTable = () => {
+    const inputs = nodes.filter(n => n.type === 'inputNode');
+    const outputs = nodes.filter(n => n.type === 'outputNode');
+    
+    // EXISTING CHECK
+    if (inputs.length === 0 || outputs.length === 0) {
+      alert("You need at least one input and one output to generate a table.");
+      return;
+    }
+
+    // NEW CHECK: Verify if outputs are connected
+    const connectedOutputs = outputs.filter(output => {
+      return edges.some(edge => edge.target === output.id);
+    });
+
+    if (connectedOutputs.length === 0) {
+      alert("Please connect your output bulb(s) to the circuit.");
+      return;
+    }
+
+    if (inputs.length > 4) {
+      alert("Truth table limited to 4 inputs (16 rows) for performance.");
+      return;
+    }
+
+    const numRows = Math.pow(2, inputs.length);
+    const tableData = [];
+
+    for (let i = 0; i < numRows; i++) {
+      let tempNodes = nodes.map(node => {
+        if (node.type === 'inputNode') {
+          const inputIndex = inputs.findIndex(inp => inp.id === node.id);
+          const val = (i >> (inputs.length - 1 - inputIndex)) & 1;
+          return { ...node, data: { ...node.data, value: val } };
+        }
+        return node;
+      });
+
+      const { updatedNodes } = evaluateCircuit(tempNodes, edges);
+      
+      const rowResult = {
+        inputs: tempNodes.filter(n => n.type === 'inputNode').map(n => n.data.value),
+        outputs: updatedNodes.filter(n => n.type === 'outputNode').map(n => n.data.value)
+      };
+      tableData.push(rowResult);
+    }
+
+    let gateIdentity = "Custom Circuit";
+    if (inputs.length === 2 && outputs.length === 1) {
+      const outValues = tableData.map(row => row.outputs[0]).join('');
+      const gateSignatures = {
+        '0001': 'AND Gate', '0111': 'OR Gate', '0110': 'XOR Gate',
+        '1110': 'NAND Gate', '1000': 'NOR Gate', '1001': 'XNOR Gate'
+      };
+      gateIdentity = gateSignatures[outValues] || "Custom Circuit";
+    }
+
+    setTruthTable({ headers: { inputs, outputs }, rows: tableData, identity: gateIdentity });
+  };
+
   return (
     <div className="w-screen h-screen bg-slate-900 flex">
-      <Sidebar />
-      <div className="flex-1 h-full" ref={reactFlowWrapper}>
+      <Sidebar onSave={onSave} onLoad={onLoad} onGenerateTable={generateTruthTable} />
+      
+      <div className="flex-1 h-full relative" ref={reactFlowWrapper}>
+        
+        {/* Truth Table Modal */}
+        {truthTable && (
+          <div 
+            className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+            onClick={() => setTruthTable(null)}
+          >
+            <div 
+              className="bg-slate-800 p-6 rounded-xl border border-slate-600 shadow-2xl min-w-[300px]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl text-white font-bold">Truth Table</h2>
+                <button onClick={() => setTruthTable(null)} className="text-slate-400 hover:text-white">✕</button>
+              </div>
+              
+              <div className="text-emerald-400 font-mono text-sm mb-4">Result: {truthTable.identity}</div>
+
+              <table className="w-full text-center text-white border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-600">
+                    {truthTable.headers.inputs.map((_, i) => <th key={`in-${i}`} className="p-2 text-blue-300">In {i+1}</th>)}
+                    {truthTable.headers.outputs.map((_, i) => <th key={`out-${i}`} className="p-2 text-yellow-300">Out {i+1}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {truthTable.rows.map((row, rIdx) => (
+                    <tr key={rIdx} className="border-b border-slate-700/50">
+                      {row.inputs.map((val, iIdx) => <td key={`r-in-${iIdx}`} className="p-2">{val}</td>)}
+                      {row.outputs.map((val, oIdx) => <td key={`r-out-${oIdx}`} className="p-2 bg-slate-700/30">{val}</td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         <ReactFlow
           nodes={nodes} edges={edges}
           nodeTypes={nodeTypes} edgeTypes={edgeTypes}
@@ -164,24 +290,13 @@ export default function App() {
         >
           <Background color="#1e293b" gap={20} size={2} />
           <Controls className="bg-slate-800 border-none shadow-lg" />
-          <Panel position="bottom-center" className="bg-slate-800/90 backdrop-blur border border-slate-700 p-4 rounded-xl shadow-2xl mb-6 text-slate-300 min-w-[320px]">
-  <h1 className="font-bold text-white text-xl text-center">Logic Gates Creator</h1>
-  <div className="flex justify-center items-center gap-2 mt-2">
-    <span className="text-xs text-slate-400">Created with ❤️ by</span>
-    <a 
-      href="https://www.instagram.com/vams.i_madhav_79" 
-      target="_blank" 
-      rel="noopener noreferrer"
-      className="text-xs text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 font-bold"
-    >
-      {/* Instagram SVG Icon */}
-      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-        <path fillRule="evenodd" d="M12.315 2c2.43 0 2.784.013 3.808.06 1.064.049 1.791.218 2.427.465a4.902 4.902 0 011.772 1.153 4.902 4.902 0 011.153 1.772c.247.636.416 1.363.465 2.427.048 1.024.06 1.378.06 3.808 0 2.43-.013 2.784-.06 3.808-.049 1.064-.218 1.791-.465 2.427a4.902 4.902 0 01-1.153 1.772 4.902 4.902 0 01-1.772 1.153c-.636.247-1.363.416-2.427.465-1.024.048-1.378.06-3.808.06-2.43 0-2.784-.013-3.808-.06-1.064-.049-1.791-.218-2.427-.465a4.902 4.902 0 01-1.772-1.153 4.902 4.902 0 01-1.153-1.772c-.247-.636-.416-1.363-.465-2.427-.047-1.024-.06-1.379-.06-3.808 0-2.43.013-2.784.06-3.808.049-1.064.218-1.791.06-2.427a4.902 4.902 0 011.153-1.772A4.902 4.902 0 015.45 2.525c.636-.247 1.363-.416 2.427-.465C8.536 2.013 8.89 2 11.32 2h.995zm0 2.162c-2.39 0-2.673.01-3.614.053-.878.04-1.356.18-1.673.303-.42.163-.72.358-1.036.673-.315.315-.51.616-.673 1.036-.123.317-.263.795-.303 1.673-.043.941-.053 1.224-.053 3.614 0 2.39.01 2.673.053 3.614.04.878.18 1.356.303 1.673.163.42.358.72.673 1.036.315.315.616.51 1.036.673.317.123.795.263 1.673.303.941.043 1.224.053 3.614.053 2.39 0 2.673-.01 3.614-.053.878-.04 1.356-.18 1.673-.303.42-.163.72-.358 1.036-.673.315-.315.51-.616.673-1.036.123-.317.263-.795.303-1.673.043-.941.053-1.224.053-3.614 0-2.39-.01-2.673-.053-3.614-.04-.878-.18-1.356-.303-1.673-.163-.42-.358-.72-.673-1.036-.315-.315-.616-.51-1.036-.673-.317-.123-.795-.263-1.673-.303-.941-.043-1.224-.053-3.614-.053zM12 6.64a5.36 5.36 0 100 10.72 5.36 5.36 0 000-10.72zm0 8.556a3.196 3.196 0 110-6.392 3.196 3.196 0 010 6.392zm6.208-8.232a1.25 1.25 0 11-2.5 0 1.25 1.25 0 012.5 0z" clipRule="evenodd" />
-      </svg>
-      @vams.i_madhav_79
-    </a>
-  </div>
-</Panel>
+          
+          <Panel position="top-right" className="bg-slate-800 px-3 py-1.5 rounded-md shadow-lg border border-slate-700 text-xs font-semibold text-slate-400">
+            <a href="https://instagram.com/vams.i_madhav_79" target="_blank" rel="noreferrer" className="hover:text-blue-400 transition-colors flex items-center gap-2">
+              <span>📸</span> @vams.i_madhav_79
+            </a>
+          </Panel>
+
         </ReactFlow>
       </div>
     </div>
