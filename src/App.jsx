@@ -287,6 +287,7 @@ export default function App() {
           onDrop={onDrop} onDragOver={onDragOver}
           deleteKeyCode={['Backspace', 'Delete']}
           fitView
+          proOptions={{ hideAttribution: true }}
         >
           <Background color="#1e293b" gap={20} size={2} />
           <Controls className="bg-slate-800 border-none shadow-lg" />

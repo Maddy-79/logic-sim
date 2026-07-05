@@ -55,4 +55,4 @@ export const evaluateCircuit = (nodes, edges) => {
   }));
 
   return { updatedNodes, edgeStates };
-};
+};  
